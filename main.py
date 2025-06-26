@@ -1,35 +1,43 @@
-import logging
-from aiogram import Bot, Dispatcher, executor, types
-from aiogram.utils.exceptions import ChatAdminRequired
-import sqlite3
-import os
+import asyncio
+from aiogram import Bot, Dispatcher, types
+from aiogram.utils import executor
+import aiosqlite
 
-API_TOKEN = os.getenv("BOT_TOKEN")
-CHANNEL_ID = os.getenv("CHANNEL_ID")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "123456"))
+API_TOKEN = "YOUR_API_TOKEN"
+ADMIN_ID = 634825131
+REQUIRED_CHANNEL_ID = -1002641870797
 
-logging.basicConfig(level=logging.INFO)
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-conn = sqlite3.connect("users.db")
-cursor = conn.cursor()
-cursor.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)")
-conn.commit()
+async def check_subscription(user_id):
+    try:
+        member = await bot.get_chat_member(REQUIRED_CHANNEL_ID, user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except:
+        return False
+
+async def create_db():
+    async with aiosqlite.connect("users.db") as db:
+        await db.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY)")
+        await db.commit()
 
 @dp.message_handler(commands=["start"])
-async def send_welcome(message: types.Message):
+async def start_handler(message: types.Message):
     user_id = message.from_user.id
-    try:
-        member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        if member.status not in ("member", "creator", "administrator"):
-            raise Exception()
-        cursor.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
-        conn.commit()
-        await message.answer("✅ Доступ разрешён. Спасибо за подписку!")
-    except:
-        invite = await bot.export_chat_invite_link(CHANNEL_ID)
-        await message.answer(f"🔒 Чтобы получить доступ, подпишитесь на канал: {invite}")
+    if not await check_subscription(user_id):
+        await message.answer("Подпишитесь на канал, чтобы использовать бота.")
+        return
+
+    async with aiosqlite.connect("users.db") as db:
+        await db.execute("INSERT OR IGNORE INTO users (id) VALUES (?)", (user_id,))
+        await db.commit()
+
+    if user_id == ADMIN_ID:
+        await message.answer("Добро пожаловать, админ!")
+    else:
+        await message.answer("Добро пожаловать!")
 
 if __name__ == "__main__":
+    asyncio.run(create_db())
     executor.start_polling(dp, skip_updates=True)
